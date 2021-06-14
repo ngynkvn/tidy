@@ -1,0 +1,13 @@
+[package]
+name = "tidy"
+version = "0.1.0"
+authors = ["Kevin Nguyen <ngynkvn@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rusqlite = "0.25.3" 
+crossterm = "0.19"
+tui = { version = "0.15", default-features = false, features = ['crossterm'] }
+structopt = "0.3.21"
