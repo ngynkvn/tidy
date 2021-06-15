@@ -1,14 +1,19 @@
+use chrono::prelude::*;
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
 use crossterm::QueueableCommand;
 use crossterm::{cursor, style, terminal, ExecutableCommand};
 use rusqlite::{params, Connection, Result};
+use std::alloc::System;
+use std::fmt::Display;
 use std::fs;
 use std::fs::DirEntry;
+use std::fs::Metadata;
 use std::fs::ReadDir;
 use std::io;
 use std::io::Error;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
+use std::time::SystemTime;
 use structopt::StructOpt;
 use tui::widgets::Wrap;
 use tui::{
@@ -22,7 +27,6 @@ use tui::{
     Terminal,
 };
 
-#[derive(Default)]
 struct State {
     path: String,
     file_list_state: ListState,
@@ -77,30 +81,13 @@ impl State {
             .into_os_string()
             .into_string()
             .unwrap();
-        let conn = Connection::open("tidy.db")?;
 
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS dirs (
-                id INTEGER PRIMARY KEY,
-                path TEXT NOT NULL UNIQUE
-            )",
-            [],
-        )?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS files (
-                id INTEGER PRIMARY KEY,
-                path TEXT NOT NULL,
-                path_id INTEGER NOT NULL REFERENCES dirs(id)
-            )",
-            [],
-        )?;
-
-        let mut list_state = ListState::default();
-        list_state.select(Some(0));
+        let mut file_list_state = ListState::default();
+        file_list_state.select(Some(0));
 
         Ok(State {
             path: directory,
-            file_list_state: list_state,
+            file_list_state,
         })
     }
 }
@@ -121,8 +108,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = Opts::from_args();
 
     let mut state = State::new(opts)?;
+    let conn = Connection::open("tidy.db")?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS dirs (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE
+            )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS files (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL,
+                path_id INTEGER NOT NULL REFERENCES dirs(id)
+            )",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO dirs (path) VALUES (?)",
+        [state.path.clone()],
+    )
+    .expect("SQL Failed");
+
+    let mut select = conn.prepare("SELECT id FROM dirs WHERE path = ?")?;
+
+    if let Some(Ok(name)) = select
+        .query_map::<u32, _, _>([state.path.clone()], |row| row.get(0))?
+        .next()
+    {
+        let mut stmt = conn.prepare("INSERT OR IGNORE INTO files (path, path_id) VALUES (?, ?)")?;
+        for path in state.files() {
+            stmt.insert(params![
+                path.into_os_string()
+                    .into_string()
+                    .expect("Could not convert to string"),
+                name
+            ])?;
+        }
+    }
 
     loop {
+        let now = SystemTime::now();
+
+        let files = state.files();
+
         // UI Loop
         terminal.draw(|rect| {
             let size = rect.size();
@@ -144,12 +174,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .title(state.path.clone())
                 .border_type(BorderType::Plain);
 
-            let file_list = state.files();
-            let items: Vec<_> = file_list
+            let items: Vec<_> = files
                 .iter()
                 .map(|file| {
+                    let meta = fs::metadata(file).unwrap();
+                    let icon = match meta.is_dir() {
+                        true => "📁",
+                        false => "📄",
+                    };
                     ListItem::new(Span::styled(
-                        format!("{}", file.display()),
+                        format!("{}{}", icon, file.display()),
                         Style::default(),
                     ))
                 })
@@ -166,9 +200,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut info_str = String::new();
             if let Some(selected) = state.file_list_state.selected() {
                 let file = &state.files()[selected];
-                let metadata = fs::metadata(file);
-                info_str = format!("{:?}", metadata);
+                let metadata = fs::metadata(file).expect("Unable to open metadata for file.");
+                info_str = metadata_str(metadata);
             }
+            let time = now.elapsed().unwrap().as_millis();
+            info_str += &format!("\n Render Time: {}", time);
 
             let info = Paragraph::new(info_str)
                 .style(Style::default().fg(Color::LightCyan))
@@ -219,4 +255,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Command::None => {}
         }
     }
+}
+
+fn metadata_str(metadata: Metadata) -> String {
+    let formatter = |date: SystemTime| {
+        DateTime::<Utc>::from(date)
+            .format("%a %b %e %T %Y")
+            .to_string()
+    };
+    let created = metadata.created().map(formatter).unwrap();
+    let accessed = metadata.accessed().map(formatter).unwrap();
+    let modified = metadata.modified().map(formatter).unwrap();
+    format!(
+        "Created: {}, Accessed: {}, Modified: {}",
+        created, accessed, modified
+    )
 }

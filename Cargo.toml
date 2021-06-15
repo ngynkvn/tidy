@@ -11,3 +11,4 @@ rusqlite = {version = "0.25.3", features = ['bundled']}
 crossterm = "0.19"
 tui = { version = "0.15", default-features = false, features = ['crossterm'] }
 structopt = "0.3.21"
+chrono = "0.4.19"                    # Date and time library for Rust
