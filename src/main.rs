@@ -10,6 +10,7 @@ use std::io::Error;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
 use structopt::StructOpt;
+use tui::widgets::Wrap;
 use tui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -132,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     [
                         Constraint::Length(0),
                         Constraint::Min(2),
-                        Constraint::Length(3),
+                        Constraint::Length(4),
                     ]
                     .as_ref(),
                 )
@@ -162,18 +163,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             rect.render_stateful_widget(list, chunks[1], &mut state.file_list_state);
 
-            let copyright = Paragraph::new("Thank you LogRocket")
+            let mut info_str = String::new();
+            if let Some(selected) = state.file_list_state.selected() {
+                let file = &state.files()[selected];
+                let metadata = fs::metadata(file);
+                info_str = format!("{:?}", metadata);
+            }
+
+            let info = Paragraph::new(info_str)
                 .style(Style::default().fg(Color::LightCyan))
-                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: true })
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
                         .style(Style::default().fg(Color::White))
-                        .title("Copyright")
+                        .title("Info")
                         .border_type(BorderType::Plain),
                 );
 
-            rect.render_widget(copyright, chunks[2]);
+            rect.render_widget(info, chunks[2]);
         })?;
         // Event Loop, Blocking
         let command = match read().unwrap() {
