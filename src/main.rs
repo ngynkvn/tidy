@@ -27,9 +27,23 @@ use tui::{
     Terminal,
 };
 
+struct MainContext {
+    file_list_state: ListState,
+    selection: Vec<PathBuf>,
+}
+struct TaggingContext {
+    tag_input: Vec<String>,
+}
+
+enum Context {
+    Main(MainContext),
+    Tagging(TaggingContext),
+}
+
 struct State {
     path: String,
     file_list_state: ListState,
+    context: Context,
 }
 
 #[derive(PartialEq)]
@@ -38,6 +52,7 @@ enum Command {
     None,
     CursorUp,
     CursorDown,
+    Tag,
 }
 
 impl State {
@@ -47,13 +62,29 @@ impl State {
                 code: KeyCode::Char('q'),
                 ..
             } => Command::Quit,
+
             KeyEvent {
                 code: KeyCode::Up, ..
+            }
+            | KeyEvent {
+                code: KeyCode::Char('k'),
+                ..
             } => Command::CursorUp,
+
             KeyEvent {
+                code: KeyCode::Char('j'),
+                ..
+            }
+            | KeyEvent {
                 code: KeyCode::Down,
                 ..
             } => Command::CursorDown,
+
+            KeyEvent {
+                code: KeyCode::Char('t'),
+                ..
+            } => Command::Tag,
+
             _ => Command::None,
         }
     }
@@ -88,6 +119,10 @@ impl State {
         Ok(State {
             path: directory,
             file_list_state,
+            context: Context::Main(MainContext {
+                file_list_state: ListState::default(),
+                selection: vec![],
+            }),
         })
     }
 }
@@ -161,13 +196,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .margin(2)
                 .constraints(
                     [
-                        Constraint::Length(0),
-                        Constraint::Min(2),
+                        Constraint::Length(3),
+                        Constraint::Min(5),
                         Constraint::Length(4),
                     ]
                     .as_ref(),
                 )
                 .split(size);
+            let command_block = Block::default()
+                .borders(Borders::ALL)
+                .style(Style::default().fg(Color::White))
+                .title("Command")
+                .border_type(BorderType::Plain);
+            rect.render_widget(command_block, chunks[0]);
+
             let file_block = Block::default()
                 .borders(Borders::ALL)
                 .style(Style::default().fg(Color::White))
@@ -253,6 +295,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Command::None => {}
+            Command::Tag => {}
         }
     }
 }
