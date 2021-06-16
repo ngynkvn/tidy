@@ -1,37 +1,19 @@
 mod ctx;
 use ctx::{Ctx, MainContext, TaggingContext};
 
-use chrono::prelude::*;
-use crossterm::event::{read, Event, KeyCode, KeyEvent};
-use crossterm::QueueableCommand;
-use crossterm::{cursor, style, terminal, ExecutableCommand};
+use crossterm::event::{read, Event, KeyEvent};
 use rusqlite::{params, Connection, Result};
-use std::alloc::System;
-use std::any::{Any, TypeId};
+use std::any::TypeId;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::fs;
 use std::fs::DirEntry;
-use std::fs::Metadata;
 use std::fs::ReadDir;
 use std::io::Error;
 use std::io::{self, Stdout};
-use std::io::{stdout, Write};
 use std::path::PathBuf;
-use std::time::SystemTime;
 use structopt::StructOpt;
-use tui::widgets::Wrap;
 use tui::Frame;
-use tui::{
-    backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Span, Spans},
-    widgets::{
-        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, Tabs,
-    },
-    Terminal,
-};
+use tui::{backend::CrosstermBackend, widgets::ListState, Terminal};
 
 struct State {
     info: DirInfo,
@@ -50,6 +32,7 @@ enum Command {
 
 pub enum Signal {
     Quit,
+    Change(TypeId),
 }
 
 #[derive(Clone)]
@@ -191,6 +174,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(Signal::Quit) = signal {
             terminal.clear()?;
             break Ok(());
+        }
+        if let Some(Signal::Change(context)) = signal {
+            state.context = context;
         }
     }
 }
