@@ -23,11 +23,12 @@ use tui::{
     Terminal,
 };
 
-use crate::{Command, DirInfo, Signal, State};
+use crate::{Command, DirInfo, Msg, Signal};
 
 pub trait Ctx {
     fn render(&mut self, rect: &mut tui::Frame<CrosstermBackend<io::Stdout>>, di: DirInfo);
     fn handle_key(&mut self, key: KeyEvent, di: DirInfo) -> Option<Signal>;
+    fn send(&mut self, msg: Msg);
 }
 
 pub struct MainContext {
@@ -158,26 +159,27 @@ impl Ctx for MainContext {
             }
             Command::None => {}
             Command::Tag => {
-                return Some(Signal::Change(TypeId::of::<TaggingContext>()));
+                let new_ctx = TypeId::of::<TaggingContext>();
+                return Some(Signal::Change(new_ctx).and(Signal::Message(
+                    new_ctx,
+                    Msg::File(state.files[self.file_list_state.selected().unwrap()].clone()),
+                )));
             }
             Command::Quit => return Some(Signal::Quit),
         };
         None
     }
+
+    fn send(&mut self, msg: Msg) {}
 }
 
 pub struct TaggingContext {
     pub tag_input: Vec<String>,
+    pub file_path: Option<PathBuf>,
 }
 impl Ctx for TaggingContext {
     fn render(&mut self, rect: &mut tui::Frame<CrosstermBackend<io::Stdout>>, di: DirInfo) {
         let size = rect.size();
-        let command_block = Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::White))
-            .title("Tag Screen")
-            .border_type(BorderType::Plain);
-
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(2)
@@ -190,11 +192,30 @@ impl Ctx for TaggingContext {
                 .as_ref(),
             )
             .split(size);
+        let command_block = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::White))
+            .title("Tag Screen")
+            .border_type(BorderType::Plain);
+
+        let paragraph = Paragraph::new(format!("{:?}", self.file_path));
+        rect.render_widget(paragraph, chunks[0]);
         rect.render_widget(command_block, chunks[1]);
     }
 
     fn handle_key(&mut self, key: KeyEvent, di: DirInfo) -> Option<Signal> {
-        todo!()
+        match key {
+            KeyEvent {
+                code: KeyCode::Char('q'),
+                ..
+            } => Some(Signal::Change(TypeId::of::<MainContext>())),
+            _ => None,
+        }
+    }
+    fn send(&mut self, msg: Msg) {
+        match msg {
+            Msg::File(path) => self.file_path = Some(path),
+        }
     }
 }
 

@@ -11,13 +11,41 @@ use std::fs::ReadDir;
 use std::io::Error;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
+use std::sync::mpsc;
 use structopt::StructOpt;
 use tui::Frame;
 use tui::{backend::CrosstermBackend, widgets::ListState, Terminal};
 
+struct Channel {
+    sender: mpsc::Sender<Signal>,
+    receiver: mpsc::Receiver<Signal>,
+}
+
+impl Channel {
+    fn new() -> Channel {
+        let (tx, rx) = mpsc::channel();
+        Channel {
+            sender: tx,
+            receiver: rx,
+        }
+    }
+
+    fn send(&mut self, msg: Signal) {
+        match msg {
+            Signal::And(s1, s2) => {
+                self.sender.send(*s1);
+                self.sender.send(*s2);
+            }
+            msg => {
+                self.sender.send(msg);
+            }
+        }
+    }
+}
 struct State {
     info: DirInfo,
     context: TypeId,
+    channel: Channel,
     ctx_map: HashMap<TypeId, Box<dyn Ctx>>,
 }
 
@@ -30,9 +58,21 @@ enum Command {
     Tag,
 }
 
+pub enum Msg {
+    File(PathBuf),
+}
+
 pub enum Signal {
     Quit,
     Change(TypeId),
+    Message(TypeId, Msg),
+    And(Box<Signal>, Box<Signal>),
+}
+
+impl Signal {
+    fn and(self, other: Signal) -> Signal {
+        Signal::And(Box::new(self), Box::new(other))
+    }
 }
 
 #[derive(Clone)]
@@ -42,11 +82,16 @@ pub struct DirInfo {
 }
 
 impl State {
-    fn handle_key(&mut self, event: KeyEvent) -> Option<Signal> {
-        self.ctx_map
+    fn handle_key(&mut self, event: KeyEvent) {
+        let signal = self
+            .ctx_map
             .get_mut(&self.context)
             .expect("Context not found.")
-            .handle_key(event, self.info.clone())
+            .handle_key(event, self.info.clone());
+
+        if let Some(signal) = signal {
+            self.channel.send(signal);
+        }
     }
 
     fn render(&mut self, rect: &mut Frame<CrosstermBackend<Stdout>>) {
@@ -75,7 +120,10 @@ impl State {
             selection: vec![],
         };
 
-        let tag_ctx = TaggingContext { tag_input: vec![] };
+        let tag_ctx = TaggingContext {
+            tag_input: vec![],
+            file_path: None,
+        };
 
         let mut ctx_map: HashMap<TypeId, Box<dyn Ctx>> = HashMap::new();
         ctx_map.insert(TypeId::of::<MainContext>(), Box::new(main_ctx));
@@ -96,6 +144,7 @@ impl State {
                 path: directory,
                 files,
             },
+            channel: Channel::new(),
             ctx_map,
             context: TypeId::of::<MainContext>(),
         })
@@ -103,7 +152,7 @@ impl State {
 }
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "tidy", about = "An example of StructOpt usage.")]
+#[structopt(name = "tidy", about = "A tui file explorer in rust")]
 struct Opts {
     #[structopt(parse(from_os_str))]
     directory: Option<PathBuf>,
@@ -138,8 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     conn.execute(
         "INSERT OR IGNORE INTO dirs (path) VALUES (?)",
         [state.info.path.clone()],
-    )
-    .expect("SQL Failed");
+    )?;
 
     let mut select = conn.prepare("SELECT id FROM dirs WHERE path = ?")?;
 
@@ -165,18 +213,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.render(rect);
         })?;
         // Event Loop, Blocking
-        let signal = match read().unwrap() {
+        match read().unwrap() {
             Event::Key(event) => state.handle_key(event),
-            Event::Mouse(_event) => None,
-            Event::Resize(_width, _height) => None,
+            Event::Mouse(_event) => {}
+            Event::Resize(_width, _height) => {}
         };
 
-        if let Some(Signal::Quit) = signal {
-            terminal.clear()?;
-            break Ok(());
-        }
-        if let Some(Signal::Change(context)) = signal {
-            state.context = context;
+        for signal in state.channel.receiver.try_iter() {
+            match signal {
+                Signal::Quit => {
+                    terminal.clear()?;
+                    return Ok(());
+                }
+                Signal::Change(context) => {
+                    state.context = context;
+                }
+                Signal::Message(context, msg) => state
+                    .ctx_map
+                    .get_mut(&context)
+                    .expect("Context not found.")
+                    .send(msg),
+                _ => {}
+            }
         }
     }
 }
