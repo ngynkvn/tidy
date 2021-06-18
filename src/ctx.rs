@@ -40,22 +40,17 @@ impl Ctx for MainContext {
         let size = rect.size();
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .margin(2)
+            .margin(1)
             .constraints(
                 [
-                    Constraint::Length(3),
                     Constraint::Min(5),
+                    Constraint::Length(3),
                     Constraint::Length(4),
                 ]
                 .as_ref(),
             )
             .split(size);
-        let command_block = Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::White))
-            .title("Command")
-            .border_type(BorderType::Plain);
-        rect.render_widget(command_block, chunks[0]);
+
         let file_block = Block::default()
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White))
@@ -82,13 +77,22 @@ impl Ctx for MainContext {
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
         );
-        rect.render_stateful_widget(list, chunks[1], &mut self.file_list_state);
+        rect.render_stateful_widget(list, chunks[0], &mut self.file_list_state);
         let mut info_str = String::new();
         if let Some(selected) = self.file_list_state.selected() {
             let file = &state.files[selected];
             let metadata = fs::metadata(file).expect("Unable to open metadata for file.");
             info_str = metadata_str(metadata);
         }
+
+        let command_block = Paragraph::new("(t)ag").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(Style::default().fg(Color::White))
+                .title("Commands")
+                .border_type(BorderType::Plain),
+        );
+        rect.render_widget(command_block, chunks[1]);
         // let time = now.elapsed().unwrap().as_millis();
         // info_str += &format!("\n Render Time: {}", time);
         let info = Paragraph::new(info_str)
